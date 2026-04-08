@@ -7,7 +7,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include <uk/arch/paging.h>
+#include <uk/paging.h>
 #include <uk/virtio_fs.h>
 #include <uk/sched.h>
 #include <uk/thread.h>
