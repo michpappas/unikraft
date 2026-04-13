@@ -2,19 +2,11 @@ name: static-analysis
 
 on:
   workflow_dispatch:
-    inputs:
-      'arch':
-        required: false
-        default: 'x86_64'
-      'codechecker-version':
-        required: false
-        default: 'master'
-      'llvm-version':
-        required: false
-        default: '21'
-      'plat':
-        required: false
-        default: 'qemu'
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [staging]
+    paths-ignore: ['*.md']
 
 jobs:
   analyze:
@@ -27,8 +19,8 @@ jobs:
       - name: "Fetch clang"
         uses: KyleMayes/install-llvm-action@v2
         with:
-          arch: ${{ case(inputs.arch == 'x86_64', 'x64', inputs.arch) }}
-          version: ${{ inputs.llvm-version }}
+          arch: 'x64'
+          version: '21'
 
       - name: "Fetch elfloader"
         uses: actions/checkout@v4
@@ -42,8 +34,8 @@ jobs:
         with:
           loglevel: debug
           workdir: _elfloader
-          plat: ${{ inputs.plat }}
-          arch: ${{ inputs.arch }}
+          plat: 'qemu'
+          arch: 'x86_64'
           execute: false
           toolchain: "COMPILER=/github/workspace/llvm/bin/clang"
           kraftfile: |
@@ -164,8 +156,8 @@ jobs:
             compiler-rt:
               version: staging
             targets:
-              - platform: ${{ inputs.plat }}
-                architecture: ${{ inputs.arch }}
+              - platform: 'qemu'
+                architecture: 'x86_64'
 
       - name: "Update compile db paths"
         run: |
@@ -175,16 +167,28 @@ jobs:
         uses: whisperity/codechecker-analysis-action@v1
         id: codechecker
         with:
-          version: ${{ inputs.codechecker-version }}
+          version: 'master'
           llvm-version: 'ignore' # already installed
           ignore-analyze-crashes: false
+          config: "${{ github.workspace }}/.codechecker.json"
           logfile: "${{ github.workspace }}/_elfloader/.unikraft/build/compile_commands.json"
-          store: true
+
+          store: ${{ github.event_name == 'workflow_dispatch' ||  github.event_name == 'push' }}
           store-url: 'https://codechecker.sin.unikraft.app/unikraft'
           store-run-name: 'app-elfloader'
           store-username: ${{ secrets.CODECHECKER_STORE_USER }}
           store-password: ${{ secrets.CODECHECKER_STORE_PASS }}
 
+          diff: ${{ github.event_name == 'pull_request' }}
+          diff-url: 'https://codechecker.sin.unikraft.app/unikraft'
+          diff-run-name: 'app-elfloader'
+          diff-username: ${{ secrets.CODECHECKER_STORE_USER }}
+          diff-password: ${{ secrets.CODECHECKER_STORE_PASS }}
+
       - name: "Check results store status"
         if: ${{ steps.codechecker.outputs.store-successful == 'false' }}
+        run: exit 1
+
+      - name: "Fail the job if new findings are introduced"
+        if: ${{ steps.codechecker.outputs.warnings-in-diff == 'true' }}
         run: exit 1
