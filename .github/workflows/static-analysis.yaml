@@ -2,14 +2,27 @@ name: static-analysis
 
 on:
   workflow_dispatch:
+    inputs:
+      trigger:
+        description: >
+          The event that triggered this workflow.
+          Use 'pull_request' to diff against the stored baseline.
+          Use 'push' to store a new baseline.
+        required: true
+        type: choice
+        options:
+          - pull_request
+          - push
 
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [staging]
-    paths-ignore: ['*.md']
+  workflow_run:
+    workflows: [integration]
+    types: [completed]
 
 jobs:
   analyze:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -174,13 +187,13 @@ jobs:
           config: "${{ github.workspace }}/.codechecker.json"
           logfile: "${{ github.workspace }}/_elfloader/.unikraft/build/compile_commands.json"
 
-          store: ${{ github.event_name == 'workflow_dispatch' ||  github.event_name == 'push' }}
+          store: ${{ inputs.trigger == 'push' || github.event.workflow_run.event == 'push' }}
           store-url: 'https://codechecker.unikraft.org/unikraft'
           store-run-name: 'app-elfloader-qemu-x86_64'
           store-username: ${{ secrets.CODECHECKER_STORE_USER }}
           store-password: ${{ secrets.CODECHECKER_STORE_PASS }}
 
-          diff: ${{ github.event_name == 'pull_request' }}
+          diff: ${{ inputs.trigger == 'pull_request' || github.event.workflow_run.event == 'pull_request' }}
           diff-url: 'https://codechecker.unikraft.org/unikraft'
           diff-run-name: 'app-elfloader-qemu-x86_64'
           diff-username: ${{ secrets.CODECHECKER_STORE_USER }}
