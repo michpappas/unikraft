@@ -191,6 +191,70 @@ jobs:
           - platform: ${{ matrix.plat }}
             architecture: ${{ matrix.arch }}
 
+  static-analysis:
+    name: static-analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build elfloader
+      id: build
+      uses: ./.github/actions/build-elfloader
+
+    - name: Run static analysis
+      uses: whisperity/codechecker-analysis-action@v1
+      id: codechecker
+      with:
+        version: 'master'
+        llvm-version: 'ignore' # already installed
+        ignore-analyze-crashes: false
+        config: "${{ github.workspace }}/.codechecker.json"
+        logfile: ${{ steps.build.outputs.logfile }}
+
+        # Storing and diffing both required credentials, so both
+	# actions are performed by the trusted `static-analysis`
+	# workflow.
+        store: false
+        diff: false
+
+    - name: Export report hashes
+      env:
+        ANALYZE_OUTPUT: ${{ steps.codechecker.outputs.analyze-output }}
+      run: |
+        set -eu
+        # `parse` exits with 2 when the analysers emitted at least one report,
+        # which is the normal case here and not an error.
+        CodeChecker parse "$ANALYZE_OUTPUT" \
+          --export baseline \
+          --output "${{ github.workspace }}/reports.baseline" \
+          || [ $? -eq 2 ]
+        # No findings at all means `parse` writes nothing.
+        touch "${{ github.workspace }}/reports.baseline"
+        echo "Exported $(grep -c '' reports.baseline) report hashes."
+
+    - name: Upload report hashes
+      uses: actions/upload-artifact@v4
+      with:
+        name: codechecker-baseline
+        path: reports.baseline
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Upload full report
+      if: ${{ always() && steps.codechecker.outputs.result-html-dir != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: codechecker-report
+        path: |
+          ${{ steps.codechecker.outputs.result-html-dir }}
+          ${{ steps.codechecker.outputs.result-log }}
+        retention-days: 7
+
   catalog-tests:
     needs: [libc-test, self-test, helloworld]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/staging' && github.repository_owner == 'unikraft' }}
